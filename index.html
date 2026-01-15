@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#8b5cf6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Iris">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <title>Iris | Asistente Visual</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            --primary: #8b5cf6;
+            --accent: #f59e0b;
+            --glass-bg: rgba(20, 20, 20, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.15);
+            --text-main: #ffffff;
+            --text-muted: #a1a1aa;
+            --danger: #ef4444;
+            --safe: #10b981;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000;
+            color: var(--text-main);
+            height: 100dvh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* --- VISOR DE CÁMARA --- */
+        #camera-wrapper {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        video.active { opacity: 1; }
+
+        /* --- HUD (RETÍCULA) --- */
+        .hud-layer {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .reticle {
+            width: 60px; height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .reticle.scanning {
+            transform: scale(1.2);
+        }
+        .reticle.scanning svg {
+            color: var(--primary);
+            filter: drop-shadow(0 0 8px var(--primary));
+        }
+
+        .reticle svg {
+            color: rgba(255, 255, 255, 0.8);
+            filter: drop-shadow(0 0 4px rgba(0,0,0,0.5));
+            transition: color 0.2s;
+        }
+
+        .reticle-dot {
+            position: absolute;
+            width: 5px; height: 5px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(255,255,255,0.9);
+        }
+
+        /* --- BARRA SUPERIOR --- */
+        .top-bar {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            padding: calc(env(safe-area-inset-top, 10px) + 10px) 16px 40px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            z-index: 30;
+            pointer-events: none;
+        }
+
+        .top-bar > * { pointer-events: auto; }
+
+        .brand {
+            font-weight: 800;
+            font-size: 1.1rem;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .brand span { color: var(--primary); }
+
+        .top-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-glass {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            color: white;
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-glass:active { transform: scale(0.9); background: rgba(255,255,255,0.2); }
+        .btn-glass.off { color: var(--text-muted); opacity: 0.7; }
+
+        /* --- SELECTOR DE MODO --- */
+        .mode-selector-wrapper {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 10px) + 55px);
+            left: 16px;
+            z-index: 25;
+            pointer-events: auto;
+        }
+        .select-container { position: relative; display: inline-block; }
+        select {
+            appearance: none;
+            background: rgba(20, 20, 20, 0.7);
+            color: white;
+            padding: 8px 32px 8px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(12px);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 600;
+            outline: none;
+            cursor: pointer;
+        }
+        .select-arrow {
+            position: absolute; right: 10px; top: 50%;
+            transform: translateY(-50%); pointer-events: none; color: white;
+        }
+
+        /* --- PANEL INFERIOR COMPACTO --- */
+        .bottom-panel {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            z-index: 20;
+            padding: 0 12px calc(env(safe-area-inset-bottom, 10px) + 10px);
+            pointer-events: none;
+        }
+
+        .bottom-panel > * {
+            pointer-events: auto;
+        }
+
+        /* --- TARJETA DE RESULTADOS COMPACTA --- */
+        .result-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .color-preview-blob {
+            width: 44px; height: 44px;
+            border-radius: 12px;
+            border: 2px solid rgba(255,255,255,0.15);
+            flex-shrink: 0;
+            transition: background-color 0.1s;
+        }
+
+        .color-meta {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .color-meta h1 {
+            font-size: 1.1rem; font-weight: 700; line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .color-meta p {
+            font-family: monospace; color: var(--text-muted);
+            font-size: 0.75rem; text-transform: uppercase;
+        }
+
+        .advice-box {
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 10px;
+            padding: 8px 10px;
+            margin-top: 8px;
+            display: none;
+            align-items: flex-start;
+            gap: 6px;
+            border-left: 3px solid var(--accent);
+        }
+        .advice-text { font-size: 0.75rem; line-height: 1.3; color: #e5e5e5; }
+
+        /* --- BOTÓN DE ESCANEO --- */
+        .scan-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding-bottom: 5px;
+        }
+
+        #scan-btn {
+            width: 64px; height: 64px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            border: 3px solid white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #scan-btn:active, #scan-btn.scanning {
+            transform: scale(0.92);
+            background: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 0 30px var(--primary);
+        }
+        #scan-btn i { color: white; opacity: 0.9; }
+
+        .scan-hint {
+            color: rgba(255,255,255,0.5);
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        /* --- PANEL DE HISTORIAL --- */
+        .history-panel {
+            position: absolute;
+            top: 0; right: 0; bottom: 0;
+            width: 85%; max-width: 300px;
+            background: #111;
+            z-index: 100;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex; flex-direction: column;
+            border-left: 1px solid var(--glass-border);
+        }
+        .history-panel.open { transform: translateX(0); }
+
+        .history-header {
+            padding: 16px;
+            border-bottom: 1px solid #222;
+            display: flex; justify-content: space-between; align-items: center;
+            background: #18181b;
+        }
+        .history-list {
+            flex: 1; overflow-y: auto; padding: 8px;
+        }
+        .history-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px;
+            background: #1f1f22;
+            margin-bottom: 6px; border-radius: 10px;
+            border: 1px solid #333;
+        }
+        .h-color {
+            width: 28px; height: 28px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .h-info { flex: 1; }
+        .h-name { font-weight: 600; font-size: 0.85rem; color: white; }
+        .h-hex { font-family: monospace; font-size: 0.7rem; color: #888; }
+        .h-del {
+            background: none; border: none; color: #666;
+            padding: 6px; cursor: pointer;
+        }
+
+        .empty-history {
+            text-align: center; color: #555; margin-top: 30px; font-size: 0.85rem;
+        }
+
+        .overlay-backdrop {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 90; opacity: 0; pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .overlay-backdrop.open { opacity: 1; pointer-events: auto; }
+
+        /* --- MODAL CONFIRMACIÓN --- */
+        .confirm-modal {
+            position: absolute; inset: 0;
+            z-index: 200;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            align-items: center; justify-content: center;
+            backdrop-filter: blur(5px);
+        }
+        .confirm-box {
+            background: #1f1f22;
+            padding: 20px;
+            border-radius: 16px;
+            width: 85%; max-width: 280px;
+            text-align: center;
+            border: 1px solid var(--glass-border);
+        }
+        .confirm-actions {
+            display: flex; gap: 10px; margin-top: 16px;
+        }
+        .c-btn {
+            padding: 10px 16px; border-radius: 10px; border: none;
+            font-weight: 600; cursor: pointer; flex: 1;
+            font-family: 'Inter', sans-serif;
+        }
+        .c-cancel { background: #333; color: white; }
+        .c-confirm { background: var(--danger); color: white; }
+
+        #process-canvas { display: none; }
+        
+        #error-msg {
+            position: absolute; inset: 0;
+            background: #111; z-index: 200;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="overlay-backdrop" id="backdrop" onclick="toggleHistory()"></div>
+
+    <div class="confirm-modal" id="confirm-modal">
+        <div class="confirm-box">
+            <h3 style="margin-bottom: 8px;">¿Borrar historial?</h3>
+            <p style="color: #aaa; font-size: 0.85rem;">Esta acción no se puede deshacer.</p>
+            <div class="confirm-actions">
+                <button class="c-btn c-cancel" onclick="closeModal()">Cancelar</button>
+                <button class="c-btn c-confirm" onclick="confirmClear()">Borrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="history-panel" id="history-panel">
+        <div class="history-header">
+            <h3 style="font-size: 1rem;">Historial</h3>
+            <button onclick="askClearHistory()" style="background:none; border:none; color:var(--danger); font-size:0.8rem; font-weight:600; cursor:pointer;">Borrar</button>
+        </div>
+        <div class="history-list" id="history-list">
+            <div class="empty-history">No hay colores guardados</div>
+        </div>
+        <div style="padding:12px; border-top:1px solid #222;">
+            <button onclick="toggleHistory()" style="width:100%; padding:10px; background:#333; color:white; border:none; border-radius:10px; font-family:'Inter',sans-serif;">Cerrar</button>
+        </div>
+    </div>
+
+    <div id="error-msg">
+        <i data-lucide="camera-off" size="48" style="color: var(--danger); margin-bottom: 20px;"></i>
+        <h2>Cámara Necesaria</h2>
+        <p style="color: #888; margin-top: 10px;">Permite el acceso para usar Iris.</p>
+        <button onclick="startCamera()" style="margin-top:20px; padding:10px 20px; background:var(--primary); color:white; border:none; border-radius:8px; font-weight:600;">Reintentar</button>
+    </div>
+
+    <div class="top-bar">
+        <div class="brand">
+            <i data-lucide="eye" size="20" color="#8b5cf6"></i>
+            Iris <span>AI</span>
+        </div>
+        <div class="top-controls">
+            <button class="btn-glass" id="vibrate-btn" onclick="toggleVibration()">
+                <i data-lucide="smartphone" id="vibrate-icon" size="18"></i>
+            </button>
+            <button class="btn-glass off" id="mute-btn" onclick="toggleAudio()">
+                <i data-lucide="volume-x" id="audio-icon" size="18"></i>
+            </button>
+            <button class="btn-glass" onclick="toggleHistory()">
+                <i data-lucide="list" size="18"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="mode-selector-wrapper">
+        <div class="select-container">
+            <select id="mode-select" onchange="setMode(this.value)">
+                <option value="normal">👁️ Normal</option>
+                <option value="protanopia">🔴 Protanopia</option>
+                <option value="deuteranopia">🟢 Deuteranopia</option>
+                <option value="tritanopia">🔵 Tritanopia</option>
+            </select>
+            <i data-lucide="chevron-down" size="14" class="select-arrow"></i>
+        </div>
+    </div>
+
+    <div id="camera-wrapper">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="hud-layer">
+            <div class="reticle" id="reticle">
+                <i data-lucide="scan" size="50" stroke-width="1"></i>
+                <div class="reticle-dot"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-panel">
+        <div class="result-card" id="result-card">
+            <div class="color-preview-blob" id="color-preview" style="background-color: #333;"></div>
+            <div class="color-meta">
+                <h1 id="color-name">Mantén para Escanear</h1>
+                <p id="color-hex">Listo</p>
+            </div>
+        </div>
+        <div class="advice-box" id="advice-box">
+            <span class="advice-text" id="advice-text"></span>
+        </div>
+        <div class="scan-row">
+            <span class="scan-hint">Mantén pulsado →</span>
+            <button id="scan-btn" 
+                    ontouchstart="startScanning(event)" 
+                    ontouchend="stopScanning(event)"
+                    onmousedown="startScanning(event)" 
+                    onmouseup="stopScanning(event)" 
+                    onmouseleave="stopScanning(event)">
+                <i data-lucide="fingerprint" size="28"></i>
+            </button>
+            <span class="scan-hint">← para detectar</span>
+        </div>
+    </div>
+
+    <canvas id="process-canvas"></canvas>
+
+    <script>
+        lucide.createIcons();
+        
+        const colors = [
+            { name: "Blanco Puro", r: 255, g: 255, b: 255 },
+            { name: "Blanco Hueso", r: 245, g: 245, b: 220 },
+            { name: "Marfil", r: 255, g: 255, b: 240 },
+            { name: "Crema", r: 255, g: 253, b: 208 },
+            { name: "Beige", r: 245, g: 245, b: 220 },
+            { name: "Arena", r: 194, g: 178, b: 128 },
+            { name: "Gris Perla", r: 230, g: 230, b: 230 },
+            { name: "Gris Plata", r: 192, g: 192, b: 192 },
+            { name: "Gris Medio", r: 169, g: 169, b: 169 },
+            { name: "Gris Cemento", r: 128, g: 128, b: 128 },
+            { name: "Gris Pizarra", r: 112, g: 128, b: 144 },
+            { name: "Gris Azulado", r: 119, g: 136, b: 153 },
+            { name: "Carbón", r: 54, g: 69, b: 79 },
+            { name: "Gris Topo", r: 72, g: 60, b: 50 },
+            { name: "Negro Azabache", r: 10, g: 10, b: 10 },
+            { name: "Negro Puro", r: 0, g: 0, b: 0 },
+            { name: "Lavanda", r: 230, g: 230, b: 250 },
+            { name: "Lavanda Floral", r: 181, g: 126, b: 220 },
+            { name: "Lila", r: 200, g: 162, b: 200 },
+            { name: "Lila Claro", r: 220, g: 208, b: 255 },
+            { name: "Cardo", r: 216, g: 191, b: 216 },
+            { name: "Malva", r: 224, g: 176, b: 255 },
+            { name: "Glicina", r: 201, g: 160, b: 220 },
+            { name: "Violeta Claro", r: 238, g: 130, b: 238 },
+            { name: "Orquídea", r: 218, g: 112, b: 214 },
+            { name: "Ciruela", r: 221, g: 160, b: 221 },
+            { name: "Amatista", r: 153, g: 102, b: 204 },
+            { name: "Violeta Oscuro", r: 148, g: 0, b: 211 },
+            { name: "Púrpura", r: 128, g: 0, b: 128 },
+            { name: "Indigo", r: 75, g: 0, b: 130 },
+            { name: "Berenjena", r: 97, g: 64, b: 81 },
+            { name: "Morado Real", r: 120, g: 81, b: 169 },
+            { name: "Azul Alicia", r: 240, g: 248, b: 255 },
+            { name: "Azul Pizarra", r: 106, g: 90, b: 205 },
+            { name: "Bígaro", r: 204, g: 204, b: 255 },
+            { name: "Azul Cielo", r: 135, g: 206, b: 235 },
+            { name: "Celeste", r: 178, g: 255, b: 255 },
+            { name: "Azul Acero", r: 70, g: 130, b: 180 },
+            { name: "Azul Real", r: 65, g: 105, b: 225 },
+            { name: "Azul Marino", r: 0, g: 0, b: 128 },
+            { name: "Azul Cobalto", r: 0, g: 71, b: 171 },
+            { name: "Azul Eléctrico", r: 125, g: 249, b: 255 },
+            { name: "Cian", r: 0, g: 255, b: 255 },
+            { name: "Turquesa", r: 64, g: 224, b: 208 },
+            { name: "Petróleo", r: 0, g: 95, b: 106 },
+            { name: "Aguamarina", r: 127, g: 255, b: 212 },
+            { name: "Rojo Pasión", r: 255, g: 0, b: 0 },
+            { name: "Rojo Cereza", r: 222, g: 49, b: 99 },
+            { name: "Carmesí", r: 220, g: 20, b: 60 },
+            { name: "Bermellón", r: 227, g: 66, b: 52 },
+            { name: "Granate", r: 128, g: 0, b: 0 },
+            { name: "Vino", r: 114, g: 47, b: 55 },
+            { name: "Terracota", r: 226, g: 114, b: 91 },
+            { name: "Rosa Pastel", r: 255, g: 182, b: 193 },
+            { name: "Rosa Chicle", r: 255, g: 105, b: 180 },
+            { name: "Rosa Palo", r: 255, g: 209, b: 220 },
+            { name: "Fucsia", r: 255, g: 0, b: 255 },
+            { name: "Magenta", r: 202, g: 31, b: 123 },
+            { name: "Salmón", r: 250, g: 128, b: 114 },
+            { name: "Coral", r: 255, g: 127, b: 80 },
+            { name: "Melocotón", r: 255, g: 218, b: 185 },
+            { name: "Naranja", r: 255, g: 165, b: 0 },
+            { name: "Naranja Intenso", r: 255, g: 140, b: 0 },
+            { name: "Mandarina", r: 242, g: 133, b: 0 },
+            { name: "Calabaza", r: 255, g: 117, b: 24 },
+            { name: "Amarillo Limón", r: 255, g: 255, b: 0 },
+            { name: "Amarillo Oro", r: 255, g: 215, b: 0 },
+            { name: "Amarillo Canario", r: 255, g: 239, b: 0 },
+            { name: "Mostaza", r: 255, g: 219, b: 88 },
+            { name: "Ocre", r: 204, g: 119, b: 34 },
+            { name: "Ámbar", r: 255, g: 191, b: 0 },
+            { name: "Verde Lima", r: 50, g: 205, b: 50 },
+            { name: "Verde Césped", r: 124, g: 252, b: 0 },
+            { name: "Verde Manzana", r: 141, g: 182, b: 0 },
+            { name: "Verde Oliva", r: 128, g: 128, b: 0 },
+            { name: "Verde Militar", r: 85, g: 107, b: 47 },
+            { name: "Verde Musgo", r: 138, g: 154, b: 91 },
+            { name: "Verde Esmeralda", r: 80, g: 200, b: 120 },
+            { name: "Verde Bosque", r: 34, g: 139, b: 34 },
+            { name: "Verde Pino", r: 1, g: 121, b: 111 },
+            { name: "Verde Menta", r: 152, g: 255, b: 152 },
+            { name: "Verde Jade", r: 0, g: 168, b: 107 },
+            { name: "Verde Mar", r: 46, g: 139, b: 87 },
+            { name: "Verde Hierba", r: 0, g: 128, b: 0 },
+            { name: "Verde Oscuro", r: 0, g: 100, b: 0 },
+            { name: "Marrón", r: 165, g: 42, b: 42 },
+            { name: "Marrón Claro", r: 196, g: 164, b: 132 },
+            { name: "Chocolate", r: 210, g: 105, b: 30 },
+            { name: "Café", r: 139, g: 69, b: 19 },
+            { name: "Siena", r: 160, g: 82, b: 45 },
+            { name: "Bronce", r: 205, g: 127, b: 50 },
+            { name: "Canela", r: 210, g: 105, b: 30 },
+            { name: "Caramelo", r: 255, g: 213, b: 128 },
+            { name: "Cobre", r: 184, g: 115, b: 51 }
+        ];
+
+        const colorWarnings = {
+            protanopia: { 
+                "Rojo": "⚠️ Este color es ROJO", 
+                "Granate": "Tono rojo oscuro", 
+                "Verde": "Puede parecer marrón/amarillo",
+                "Púrpura": "Contiene rojo",
+                "Rosa": "Contiene rojo",
+                "Naranja": "Mezcla rojo+amarillo"
+            },
+            deuteranopia: { 
+                "Verde": "⚠️ Este color es VERDE", 
+                "Rojo": "Puede parecer marrón", 
+                "Rosa": "No es gris, tiene rojo",
+                "Naranja": "Mezcla de colores"
+            },
+            tritanopia: { 
+                "Azul": "⚠️ Este color es AZUL", 
+                "Amarillo": "Color cálido brillante",
+                "Violeta": "Mezcla azul+rojo",
+                "Lavanda": "Puede parecer rosado"
+            }
+        };
+
+        let isScanning = false;
+        let audioEnabled = false;
+        let vibrationEnabled = true;
+        let currentMode = 'normal';
+        let lastColor = null;
+        let colorHistory = JSON.parse(localStorage.getItem('iris_history')) || [];
+        let stream = null;
+
+        const canvas = document.getElementById('process-canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const video = document.getElementById('video');
+
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                video.srcObject = stream;
+                document.getElementById('error-msg').style.display = 'none';
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    video.classList.add('active');
+                    requestAnimationFrame(processLoop);
+                };
+            } catch (err) {
+                document.getElementById('error-msg').style.display = 'flex';
+            }
+        }
+
+        function processLoop() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                if (isScanning) {
+                    const cx = Math.floor(canvas.width / 2);
+                    const cy = Math.floor(canvas.height / 2);
+                    const frameData = ctx.getImageData(cx - 4, cy - 4, 9, 9).data;
+                    
+                    let r=0, g=0, b=0, c=0;
+                    for(let i=0; i<frameData.length; i+=4) {
+                        r+=frameData[i]; g+=frameData[i+1]; b+=frameData[i+2]; c++;
+                    }
+                    r=Math.round(r/c); g=Math.round(g/c); b=Math.round(b/c);
+
+                    const match = findClosestColor(r, g, b);
+                    
+                    if (!lastColor || match.name !== lastColor.name) {
+                        updateUI(match, r, g, b);
+                        lastColor = { ...match, r, g, b };
+                        
+                        if (vibrationEnabled && navigator.vibrate) {
+                            navigator.vibrate(30);
+                        }
+                    }
+                }
+            }
+            requestAnimationFrame(processLoop);
+        }
+
+        function findClosestColor(r, g, b) {
+            let min = Infinity;
+            let best = null;
+            colors.forEach(c => {
+                const rmean = (r + c.r) / 2;
+                const d = Math.sqrt((2+rmean/256)*(r-c.r)**2 + 4*(g-c.g)**2 + (2+(255-rmean)/256)*(b-c.b)**2);
+                if (d < min) { min = d; best = c; }
+            });
+            return best;
+        }
+
+        function startScanning(e) {
+            if(e) e.preventDefault();
+            isScanning = true;
+            document.getElementById('scan-btn').classList.add('scanning');
+            document.getElementById('reticle').classList.add('scanning');
+        }
+
+        function stopScanning(e) {
+            if(e) e.preventDefault();
+            if (!isScanning) return;
+            
+            isScanning = false;
+            document.getElementById('scan-btn').classList.remove('scanning');
+            document.getElementById('reticle').classList.remove('scanning');
+
+            if (lastColor) {
+                addToHistory(lastColor);
+                if (audioEnabled) speak(lastColor.name);
+            }
+        }
+
+        function updateUI(color, r, g, b) {
+            const hex = "#" + ((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1).toUpperCase();
+            
+            document.getElementById('color-name').textContent = color.name;
+            document.getElementById('color-hex').textContent = hex;
+            document.getElementById('color-preview').style.backgroundColor = hex;
+
+            let advice = "";
+            if (currentMode !== 'normal' && colorWarnings[currentMode]) {
+                for(const [key, msg] of Object.entries(colorWarnings[currentMode])) {
+                    if (color.name.toLowerCase().includes(key.toLowerCase())) { 
+                        advice = msg; 
+                        break; 
+                    }
+                }
+            }
+            
+            const adviceBox = document.getElementById('advice-box');
+            if (advice) {
+                document.getElementById('advice-text').textContent = advice;
+                adviceBox.style.display = 'flex';
+            } else {
+                adviceBox.style.display = 'none';
+            }
+        }
+
+        function addToHistory(colorData) {
+            const item = {
+                name: colorData.name,
+                hex: "#" + ((1<<24)+(colorData.r<<16)+(colorData.g<<8)+colorData.b).toString(16).slice(1).toUpperCase(),
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            
+            colorHistory.unshift(item);
+            if (colorHistory.length > 50) colorHistory.pop();
+            
+            localStorage.setItem('iris_history', JSON.stringify(colorHistory));
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('history-list');
+            list.innerHTML = '';
+            
+            if (colorHistory.length === 0) {
+                list.innerHTML = '<div class="empty-history">No hay colores guardados</div>';
+                return;
+            }
+
+            colorHistory.forEach((item, index) => {
+                const el = document.createElement('div');
+                el.className = 'history-item';
+                el.innerHTML = `
+                    <div class="h-color" style="background-color: ${item.hex}"></div>
+                    <div class="h-info">
+                        <div class="h-name">${item.name}</div>
+                        <div class="h-hex">${item.hex} • ${item.time}</div>
+                    </div>
+                    <button class="h-del" onclick="deleteHistoryItem(${index})">✕</button>
+                `;
+                list.appendChild(el);
+            });
+        }
+
+        function deleteHistoryItem(index) {
+            colorHistory.splice(index, 1);
+            localStorage.setItem('iris_history', JSON.stringify(colorHistory));
+            renderHistory();
+        }
+
+        function askClearHistory() {
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('confirm-modal').style.display = 'none';
+        }
+
+        function confirmClear() {
+            colorHistory = [];
+            localStorage.removeItem('iris_history');
+            renderHistory();
+            closeModal();
+        }
+
+        function toggleHistory() {
+            const panel = document.getElementById('history-panel');
+            const backdrop = document.getElementById('backdrop');
+            
+            if (!panel.classList.contains('open')) renderHistory();
+
+            panel.classList.toggle('open');
+            backdrop.classList.toggle('open');
+        }
+
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            const icon = document.getElementById('audio-icon');
+            const btn = document.getElementById('mute-btn');
+            
+            if(audioEnabled) {
+                icon.setAttribute('data-lucide', 'volume-2');
+                btn.classList.remove('off');
+                speak("Voz activada");
+            } else {
+                icon.setAttribute('data-lucide', 'volume-x');
+                btn.classList.add('off');
+                window.speechSynthesis.cancel();
+            }
+            lucide.createIcons();
+        }
+
+        function toggleVibration() {
+            vibrationEnabled = !vibrationEnabled;
+            const icon = document.getElementById('vibrate-icon');
+            const btn = document.getElementById('vibrate-btn');
+            
+            if(vibrationEnabled) {
+                icon.setAttribute('data-lucide', 'smartphone');
+                btn.classList.remove('off');
+                if (navigator.vibrate) navigator.vibrate(50);
+            } else {
+                icon.setAttribute('data-lucide', 'smartphone-off');
+                btn.classList.add('off');
+            }
+            lucide.createIcons();
+        }
+
+        function speak(text) {
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = 'es-ES';
+            u.rate = 1.1;
+            window.speechSynthesis.speak(u);
+        }
+
+        function setMode(val) { currentMode = val; }
+
+        // Registrar Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(() => console.log('PWA Iris lista'))
+                .catch(err => console.log('SW error:', err));
+        }
+
+        window.onload = startCamera;
+    </script>
+</body>
+</html>
